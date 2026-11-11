@@ -383,8 +383,6 @@ function helpers.GetApiBaseUrls()
 end
 
 -- ==================== GITHUB UID WHITELIST ====================
--- Set this to the RAW url of your whitelist file (one UID per line, public repo).
--- Example: https://raw.githubusercontent.com/YourName/YourRepo/main/whitelist.txt
 local WHITELIST_URL = "https://raw.githubusercontent.com/dodgedgit/whitelist/main/whitelist.txt"
 
 function helpers.FetchWorkerWhitelist()
