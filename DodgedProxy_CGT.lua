@@ -561,15 +561,23 @@ function helpers.FetchWorkerWhitelist()
 
     -- ?t= avoids stale cached copies of the file
     local url = WHITELIST_URL .. "?t=" .. tostring(os.time())
-    local ok, res = pcall(MakeRequest, url, "GET", { ["User-Agent"] = "DodgedProxy/1.0" }, "", 5000)
-    if not ok or not res or res.error or not res.content or res.status ~= 200 then
-        return false, "whitelist fetch failed"
+    local ok, res = pcall(MakeRequest, url, "GET", {}, "", 8000)
+    if not ok or type(res) ~= "table" or res.error or not res.content or res.status ~= 200 then
+        local why
+        if not ok then why = tostring(res)
+        elseif type(res) ~= "table" then why = "no response"
+        else why = "HTTP " .. tostring(res.status) .. " " .. tostring(res.errorMessage or res.error or "") end
+        whitelist_state.last_error = why
+        return false, "whitelist fetch failed: " .. why
     end
+    whitelist_state.last_error = nil
 
     local all_uids, hst_map = {}, {}
     for line in tostring(res.content):gmatch("[^\r\n]+") do
-        line = line:gsub("#.*$", "")
-        local uid = line:match("^%s*(%d+)%s*$")
+        -- format: "<uid>" or "<uid> # exp=<unix time>" (exp=0 or missing = never expires)
+        local uid = line:match("^%s*(%d+)")
+        local exp = tonumber(line:match("exp=(%d+)")) or 0
+        if uid and exp > 0 and exp <= os.time() then uid = nil end -- expired license
         if uid then
             all_uids[uid] = true
             hst_map[uid] = {
@@ -1271,7 +1279,6 @@ function helpers.SendHeartbeat()
 
     local headers = {
         ["Content-Type"] = "application/json",
-        ["User-Agent"]   = "DodgedProxy/1.0"
     }
 
     RunThread(function()
@@ -2658,7 +2665,7 @@ function helpers.TranslateText(raw_text, target_lang)
     local ok_fb, fb_res, fb_det = pcall(function()
         local encoded_q = helpers.UrlEncode(clean_check)
         local fb_url = "https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=" .. target_code .. "&dt=t&q=" .. encoded_q
-        local fb_ok, fb_resp = pcall(MakeRequest, fb_url, "GET", { ["User-Agent"] = "Mozilla/5.0" }, "", 3000)
+        local fb_ok, fb_resp = pcall(MakeRequest, fb_url, "GET", {}, "", 3000)
         if fb_ok and fb_resp and not fb_resp.error and fb_resp.content and fb_resp.content ~= "" then
             local primary_match = fb_resp.content:match('^%[%[%["(.-)",')
             if primary_match then
@@ -6318,7 +6325,7 @@ function HandleSendPacket(pkt_type, packet)
 
         -- Whitelist authorization check for all commands (3-Tier: Bypass, Hoster, Worker)
         if not whitelist_state.is_authorized then
-            helpers.OnConsoleMessage("`4[Access Denied] `0Akses ditolak! User ID belum terdaftar di Discord bot (Worker / Hoster / Bypass).")
+            helpers.OnConsoleMessage("`4[Access Denied] `0You are not on the whitelist.")
             helpers.OnTextOverlay("`4[DODGED] Access Denied: Not Whitelisted!")
             return true
         end
@@ -7592,7 +7599,12 @@ RunThread(function()
     if not ok_auth or not auth_info then
         local ok_loc, me = pcall(GetLocal)
         local my_uid = (ok_loc and me and me.userid) and tostring(math.floor(tonumber(me.userid) or 0)) or "Unknown"
-        helpers.OnConsoleMessage("`4[Access Denied] `0User ID (" .. my_uid .. ") belum terdaftar di Discord bot! Silakan daftar via /addworker atau /addhoster.")
+        local why = whitelist_state.last_error
+        if why then
+            helpers.OnConsoleMessage("`4[Access Denied] `0Could not load the whitelist: " .. tostring(why))
+        else
+            helpers.OnConsoleMessage("`4[Access Denied] `0UID " .. my_uid .. " is not on the whitelist (or its license expired).")
+        end
         helpers.OnTextOverlay("`4[DODGED] Access Denied: Unregistered User (" .. my_uid .. ")!")
         helpers.Say("`4Access Denied! UID: " .. my_uid)
 
